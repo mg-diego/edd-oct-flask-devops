@@ -26,7 +26,6 @@ pipeline {
         CONTAINER_NAME = ''
         CURRENT_IMAGE_NAME = ''
         PREVIOUS_IMAGE_NAME = ''
-        MAIL_LIST = "frovirat.ficosa@gmail.com"
     }
     stages {
         stage('Info') {
@@ -106,18 +105,35 @@ pipeline {
             }
         }
         stage('Build') {
+            when {
+                expression { LOCAL_BRANCH_NAME == 'origin/master' }
+            }
             steps {
                 echo 'Building...'
+                sh "docker build -t $CURRENT_IMAGE_NAME ."
             }
         }
         stage('Deploy') {
+            when {
+                expression { LOCAL_BRANCH_NAME == 'origin/master' }
+            }
             steps {
                 echo 'Deploying...'
+                sh "docker ps -af name=$CONTAINER_NAME -q | xargs --no-run-if-empty docker container rm -f"
+                sh "docker run -d -p $GROUP_PORT:5000 --name $CONTAINER_NAME $CURRENT_IMAGE_NAME"
             }
         }
         stage('Health-check') {
+            when {
+                expression { LOCAL_BRANCH_NAME == 'origin/master' }
+            }
             steps {
-                echo "Health-check"
+                sleep 5
+                httpRequest(
+                        url: "http://$DEPLOY_URL:$GROUP_PORT",
+                        validResponseCodes: "200",
+                        timeout:30
+                    )
             }
         }
     }
@@ -125,11 +141,19 @@ pipeline {
         failure {
             script {
                 sh "echo POST-ACTION failure"
+                if (LOCAL_BRANCH_NAME == 'origin/master' && CURRENT_IMAGE_NAME != '') {
+                    sh "docker ps -af name=$CONTAINER_NAME -q | xargs --no-run-if-empty docker container rm -f"
+                    sh "docker run -d -p $GROUP_PORT:5000 --name $CONTAINER_NAME $PREVIOUS_IMAGE_NAME | echo"
+                    sh "docker image rmi $CURRENT_IMAGE_NAME | echo"
+                }
             }
         }
         success {
             script {
                 sh "echo POST-ACTION success"
+                if (LOCAL_BRANCH_NAME == 'origin/master' && PREVIOUS_IMAGE_NAME != '') {
+                    sh "docker rmi $PREVIOUS_IMAGE_NAME | echo"
+                }
             }
         }
         always {
